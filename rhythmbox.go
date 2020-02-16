@@ -1,19 +1,23 @@
+// Manipulate a Rhythmbox playlist file.
 package main
 
 import (
+	cryptorand "crypto/rand"
 	"encoding/xml"
 	"flag"
 	"fmt"
 	"log"
+	"math/big"
 	"math/rand"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
-const playlistsPath = "/home/aaron/.local/share/rhythmbox/playlists.xml"
+const playlistsRelPath = ".local/share/rhythmbox/playlists.xml" // relative to ${HOME}
 
 type RhythmDBPlaylists struct {
 	XMLName   xml.Name
@@ -61,6 +65,7 @@ var (
 	shuffleInDir = flag.Bool("shuffleInDir", true, "whether to shuffle the songs in one directory")
 	doDisplay    = flag.Bool("display", false, "whether to display info on static playlists")
 	doDisplayAll = flag.Bool("displayAll", false, "whether to display the song file paths as well")
+	rnd          = Seeded()
 )
 
 func main() {
@@ -70,6 +75,12 @@ func main() {
 	if *doDisplayAll {
 		*doDisplay = true
 	}
+
+	homePath, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal("UserHomeDir", err)
+	}
+	playlistsPath := filepath.Join(homePath, playlistsRelPath)
 
 	inFile, err := os.Open(playlistsPath)
 	if err != nil {
@@ -84,6 +95,8 @@ func main() {
 		log.Fatal("decode", err)
 	}
 
+	// shuffle the first static Playlist found, saving it as a new Playlist at the end
+	// TODO: consider flags to 1) print list of playlist names, 2) select which playlist to create a shuffled copy of
 	for _, p := range doc.Playlists {
 		if p.Type != "static" {
 			continue
@@ -94,7 +107,12 @@ func main() {
 			display(&p)
 		}
 
-		shuffle(p.Locations, *shuffleDirs, *shuffleInDir)
+		newP := p
+		randNum := rnd.Int31() % (1 << 24)
+		newP.Name += fmt.Sprintf("_SHUFFLED_%s_%d", time.Now().Format("2006-01-02"), randNum)
+		newP.Locations = shuffle(p.Locations, *shuffleDirs, *shuffleInDir)
+		doc.Playlists = append(doc.Playlists, newP)
+		break
 	}
 
 	// output the XML
@@ -139,21 +157,23 @@ func display(p *Playlist) {
 	}
 }
 
-// shuffle changes the order of the elements in the supplied slice of Locations according to two boolean options.
+// shuffle returns a shuffled copy of the supplied slice of Locations according to two boolean options.
 // shuffleDirs - shuffle the directories; if false, they are sorted.
 // shuffleInDir - shuffle within one directory; if false, they are sorted.
-func shuffle(locations []Location, shuffleDirs, shuffleInDir bool) {
+func shuffle(locations []Location, shuffleDirs, shuffleInDir bool) []Location {
 	all := make(map[string][]Location) // map of dir => contents of dir
 	var dirs []string                  // all dirs - determines order they get written out in
 	for _, l := range locations {
 		dir, _ := l.Split()
-		dirs = append(dirs, dir)
+		if _, ok := all[dir]; !ok {
+			dirs = append(dirs, dir)
+		}
 		all[dir] = append(all[dir], l)
 	}
 
 	// shuffle according to options
 	if shuffleDirs {
-		rand.Shuffle(len(dirs), func(i, j int) {
+		rnd.Shuffle(len(dirs), func(i, j int) {
 			dirs[i], dirs[j] = dirs[j], dirs[i]
 		})
 	} else {
@@ -162,16 +182,18 @@ func shuffle(locations []Location, shuffleDirs, shuffleInDir bool) {
 	if shuffleInDir {
 		// shuffle
 		for _, dir := range dirs {
-			rand.Shuffle(len(all[dir]), func(i, j int) {
-				all[dir][i], all[dir][j] = all[dir][j], all[dir][i]
+			thisDir := all[dir]
+			rnd.Shuffle(len(thisDir), func(i, j int) {
+				thisDir[i], thisDir[j] = thisDir[j], thisDir[i]
 			})
 		}
 	} else {
 		// sort
 		for _, dir := range dirs {
-			sort.Slice(all[dir], func(i, j int) bool {
-				_, fileI := all[dir][i].Split()
-				_, fileJ := all[dir][j].Split()
+			thisDir := all[dir]
+			sort.Slice(thisDir, func(i, j int) bool {
+				_, fileI := thisDir[i].Split()
+				_, fileJ := thisDir[j].Split()
 				return strings.Compare(fileI, fileJ) == -1
 			})
 		}
@@ -181,5 +203,20 @@ func shuffle(locations []Location, shuffleDirs, shuffleInDir bool) {
 	for _, dir := range dirs {
 		result = append(result, all[dir]...)
 	}
-	copy(locations, result)
+	if len(result) != len(locations) {
+		log.Fatal("len(result) != len(locations)", len(result), len(locations))
+	}
+	return result
+}
+
+func Seeded() *rand.Rand {
+	nBig, err := cryptorand.Int(cryptorand.Reader, big.NewInt(1<<62))
+	if err != nil {
+		log.Fatal("Int", err)
+	}
+	if !nBig.IsInt64() {
+		log.Fatal("not an int64")
+	}
+	n := nBig.Int64()
+	return rand.New(rand.NewSource(n))
 }
