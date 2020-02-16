@@ -97,6 +97,7 @@ func main() {
 
 	// shuffle the first static Playlist found, saving it as a new Playlist at the end
 	// TODO: consider flags to 1) print list of playlist names, 2) select which playlist to create a shuffled copy of
+	var processedAPlaylist bool
 	for _, p := range doc.Playlists {
 		if p.Type != "static" {
 			continue
@@ -107,12 +108,16 @@ func main() {
 			display(&p)
 		}
 
+		if processedAPlaylist {
+			continue
+		}
+
 		newP := p
 		randNum := rnd.Int31() % (1 << 24)
 		newP.Name += fmt.Sprintf("_SHUFFLED_%s_%d", time.Now().Format("2006-01-02"), randNum)
 		newP.Locations = shuffle(p.Locations, *shuffleDirs, *shuffleInDir)
 		doc.Playlists = append(doc.Playlists, newP)
-		break
+		processedAPlaylist = true
 	}
 
 	// output the XML
@@ -151,7 +156,9 @@ func display(p *Playlist) {
 	fmt.Println("SearchType:", p.SearchType)
 	fmt.Println("Type:", p.Type)
 	fmt.Println("SortKey:", p.SortKey)
-	fmt.Println("SortDirection:", *p.SortDirection)
+	if p.SortDirection != nil {
+		fmt.Println("SortDirection:", *p.SortDirection)
+	}
 	if p.Conjunction != nil {
 		fmt.Println("Conjunction:", *p.Conjunction)
 	}
