@@ -65,6 +65,7 @@ var (
 	shuffleInDir = flag.Bool("shuffleInDir", true, "whether to shuffle the songs in one directory")
 	doDisplay    = flag.Bool("display", false, "whether to display info on static playlists")
 	doDisplayAll = flag.Bool("displayAll", false, "whether to display the song file paths as well")
+	search       = flag.String("search", "", "lists playlist indices of paths matching this string (OVERRIDES ALL ELSE)")
 	rnd          = Seeded()
 )
 
@@ -103,6 +104,11 @@ func main() {
 			continue
 		}
 
+		if *search != "" {
+			searchPlaylist(*search, p)
+			continue // Overrides all other options
+		}
+
 		if *doDisplay {
 			fmt.Println("===")
 			display(&p)
@@ -120,8 +126,8 @@ func main() {
 		processedAPlaylist = true
 	}
 
-	// output the XML
-	if *out != "" {
+	// output the XML (unless -search was specified, which overrides this)
+	if *out != "" && *search == "" {
 		outFile, err := os.Create(*out)
 		if err != nil {
 			log.Fatal("out file", err)
@@ -139,6 +145,22 @@ func main() {
 		err = encoder.Encode(doc)
 		if err != nil {
 			log.Fatal("encode", err)
+		}
+	}
+}
+
+func searchPlaylist(target string, playlist Playlist) {
+	printedPlaylistName := false
+	target = strings.ToLower(target)
+	for i, loc := range playlist.Locations {
+		path := loc.Text()
+		if strings.Contains(strings.ToLower(path), target) {
+			// match! yayyyy!
+			if !printedPlaylistName {
+				fmt.Printf("PLAYLIST %q\n", playlist.Name)
+				printedPlaylistName = true
+			}
+			fmt.Printf("  INDEX %d PATH %q\n", i+1, path)
 		}
 	}
 }
